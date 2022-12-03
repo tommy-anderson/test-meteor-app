@@ -1,0 +1,146 @@
+name: baseFlow
+
+on:
+  push:
+    branches:
+      - main
+env:
+  meteorVersion: 2.8.1
+  cypressVersion: 11.2.0
+jobs:
+  #
+  #
+  #
+  #
+  install-dependencies:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      # Cancel previous runs in case of new push
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{secrets.GH_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      ####### START CACHE #######
+      # Cache meteor installation
+      - name: Cache Meteor
+        id: meteor-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.meteor
+          key: ${{ runner.os }}-meteorInstall-${{ env.meteorVersion }}
+      # Cache NPM so installs are faster
+      - name: Cache NPM
+        id: npm-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('.meteor/versions') }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('patches') }}
+          restore-keys: ${{ runner.os }}-npm-${{ hashFiles('.meteor/versions') }}-
+      # CACHE Cypress so installs are faster
+      - name: Cache Cypress
+        id: cypress-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/Cypress
+          key: ${{ runner.os }}-cypress-${{ env.cypressVersion }}
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('.meteor/versions') }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('patches') }}
+          restore-keys: ${{ runner.os }}-node-modules-${{ hashFiles('.meteor/versions') }}
+      ####### END CACHE #######
+      # We only install meteor if there's no cache hit
+      - name: Install Meteor
+        if: steps.meteor-cache.outputs.cache-hit != 'true'
+        uses: meteorengineer/setup-meteor@v1.0.4
+        with:
+          meteor-release: ${{ env.meteorVersion }}
+      # If there's a cache hit, we need to add meteor to the path
+      - name: Add meteor path
+        if: steps.meteor-cache.outputs.cache-hit == 'true'
+        run: echo "$HOME/.meteor" >> $GITHUB_PATH
+      - name: Install deps
+        run: meteor npm i
+  #
+  #
+  #
+  #
+  E2E:
+    timeout-minutes: 80
+    runs-on: ubuntu-latest
+    needs: SmokeTest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      ####### START CACHE #######
+      # Cache meteor installation
+      - name: Cache Meteor
+        id: meteor-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.meteor
+          key: ${{ runner.os }}-meteorInstall-${{ env.meteorVersion }}
+      # Cache NPM so installs are faster
+      - name: Cache NPM
+        id: npm-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('.meteor/versions') }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('patches') }}
+          restore-keys: ${{ runner.os }}-npm-${{ hashFiles('.meteor/versions') }}
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('.meteor/versions') }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('patches') }}
+          restore-keys: ${{ runner.os }}-node-modules-${{ hashFiles('.meteor/versions') }}-
+      ####### END CACHE #######
+      - name: Restore meteor Cache from smoke Test
+        id: smoke-meteor-build-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            .meteor/local/resolver-result-cache.json
+            .meteor/local/plugin-cache
+            .meteor/local/isopacks
+            .meteor/local/bundler-cache/scanner
+            .meteor/local/bundler-cache/linker
+          key: meteor-planable-app-SmokeTests-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            meteor-planable-app-SmokeTests-${{ github.ref }}
+            meteor-planable-app-SmokeTests-
+      - name: Cache meteor build paths
+        id: e2e-meteor-build-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            .meteor/local/resolver-result-cache.json
+            .meteor/local/plugin-cache
+            .meteor/local/isopacks
+            .meteor/local/bundler-cache/scanner
+            .meteor/local/bundler-cache/linker
+          key: meteor-planable-app-E2E-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            meteor-planable-app-SmokeTests-${{ github.ref }}
+            meteor-planable-app-SmokeTests-
+      - name: Cache Cypress
+        id: cypress-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/Cypress
+          key: ${{ runner.os }}-cypress-${{ env.cypressVersion }}
+      - name: Start app
+        run: nohup meteor npm run start & meteor npm run wait-on-localhost
+      - name: Run main tests
+        run: meteor npx cypress run
